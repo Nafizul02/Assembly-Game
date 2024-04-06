@@ -10,12 +10,17 @@
 .data
 hitbox: .word 0:9
 hitboxLen: .word 9
-CharX: .word 10
-CharY: .word 20
-platformX: .word 6, 18, 24, 28, 16, 48
-platformY: .word 48, 40, 24, 32, 16, 32
-platformSize: .word 10, 11, 8, 13, 13, 5
-platformLen: .word 6
+CharX: .word 12
+CharY: .word 40
+Lives: .word 3
+EnemyX: .word 4,4
+EnemyY: .word 22, 38
+EnemyNum: .word 2
+Bullets: .word 0:2
+platformX: .word 1,1,11, 19, 24, 28, 16, 48,45
+platformY: .word 24,40,48, 40, 24, 32, 16, 32,16
+platformSize: .word 6,6,10, 11, 8, 13, 13, 5,7
+platformLen: .word 9
 newline: .asciiz "\n"
 .eqv SPEED 4
 .eqv JUMP 15
@@ -24,18 +29,20 @@ newline: .asciiz "\n"
 
 .eqv CENTERCOLOR CYAN
 .eqv CHARCOLOR RED
-.eqv BORDERCOLOR 0xD16002
-.eqv PLATFORMCOLOR 0xe6cc00
+.eqv BORDERCOLOR 0xe6cc00
+.eqv PLATFORMCOLOR 0xD16002
+.eqv ENEMYTOPCOLOR 0x707070
+.eqv ENEMYBOTTOMCOLOR 0x9c5a3c
+.eqv BULLETCOLOR 0xb4b4b4
 .eqv RED 0xff0000
 .eqv GREEN 0x00ff00
 .eqv BLUE 0x0000ff
 .eqv CYAN 0x00ffff
 .globl main
 .text
-main:	
-	# Sets up the game
+main:	# Sets up the game
 	li $t0, BASE_ADDRESS
-	# Draw border ///////////////////////
+	# Draw border 
 	li $a0, 0
 	li $a1, 0
 	li $a2, BORDERCOLOR
@@ -56,57 +63,21 @@ main:
 	li $a2, BORDERCOLOR
 	li $a3, 64
 	jal drawLineX
-	#jal drawBorder
-	
-	# Create playable object
-	
+	# Create playable character
 	jal createChar
-	
-	
 	# Create Platforms
-	li $s3, RED
-	
 	la $a0, platformX # store address of X
 	la $a1, platformY # store address of Y
 	la $a2, platformSize # store address of Size
 	lw $a3, platformLen
 	jal createPlatforms
-	
-	#la $t1, hitbox
-	#lw $t2, 0($t1)
-	#addi $t2, $t2, -4
-	#lw $t2, 0($t2)
-	#lw $t3, 12($t1)
-	#lw $t3, 0($t3)
-	#lw $t4, 24($t1)
-	#lw $t4, 0($t4)
-	
-	#li $v0, 1
-	#move $a0, $t2
-	#syscall
-	
-	#li $v0, 4
-	#la $a0, newline
-	#syscall 
-	
-	#li $v0, 1
-	#move $a0, $t3
-	#syscall
-	
-	#li $v0, 4
-	#la $a0, newline
-	#syscall
-	
-	#li $v0, 1
-	#move $a0, $t4
-	#syscall
-	
-	#li $v0, 4
-	#la $a0, newline
-	#syscall 
-	
-
+	# Create Enemies
+	jal createEnemies
+	# Create Lives
+	jal createLives
+	lw $s0, Lives
 mainLoop: # main loop of the game
+	li $s1, 1 # $s1 = character has not collided with bullet nor fallen off
 	li $t9, 0xffff0000
 	lw $t8, 0($t9)
 	bne $t8, 1, skipKey
@@ -114,11 +85,34 @@ mainLoop: # main loop of the game
 skipKey:
 	li $v0, 0
 	jal fall
-	beq $v0, 1, skipDeath
+	
+	# Update bullets and items
+	la $t1, Bullets
+	lw $t2, 0($t1) # Address in current Bullets array
+	li $a0, 8 # Bullets x
+	li $a1,21 # Bullet y
+	move $a2, $t1 # Current Bullets array
+	bne $t2, 0, skipEnemy1 # If bullet does not exist, enemy fires a bullet
+	jal enemyFire
+skipEnemy1:
+	la $t1, Bullets
+	li $a0, 8 # Bullets x
+	li $a1,37 # Bullet y
+	addi $a2, $t1, 4 # Current Bullets array 
+	lw $t2, 0($a2) # Address  in current Bullets array
+	bne $t2, 0, skipEnemy2 # If bullet does not exist, enemy fires a bullet
+	jal enemyFire
+skipEnemy2:
+	la $t1, Bullets
+	li $t2, 2
+	jal bulletsMove
+	# Check collision
+	
+	beq $s1, 1, skipDeath
 	jal death
 skipDeath:
 	li $v0, 32
-	li $a0, 66 # Wait 66 milliseconds
+	li $a0, 120 # Wait 120 milliseconds
 	syscall
 	j mainLoop
 keyPress: # Check for input
@@ -127,7 +121,7 @@ keyPress: # Check for input
 	beq $t2, 0x61, moveLeft # a = left
 	beq $t2, 0x64, moveRight # d = right
 	beq $t2, 0x77, jumpCheck # w = jump
-	beq $t2, 0x72, main # r = reset
+	beq $t2, 0x72, restart # r = reset
 	beq $t2, 0x71, end # q = quit
 	jr $ra
 death: # Character took damage or fell from world
@@ -144,9 +138,55 @@ death_loop: # Remove color of each hitbox
 	addi $t2, $t2, 4 # $t2 iterates hitbox array
 	
 	ble $t2, $t6, death_loop
-	# When current charcater disappears, create new character at starting x and y
+	
+removeLife: # Removes a life from the screen
 	addi $sp, $sp, -4
 	sw $ra, 0($sp)
+	
+	addi $s0, $s0, -1
+	blt $s0, 0, gameOver
+	beq $s0, 0, lastLife
+	beq $s0, 1, midLife
+	# Remove First life
+	li $a0, 40
+	li $a1, 59
+	li $a2, 0
+	li $a3, 5
+	jal drawLineX
+	
+	li $a0, 42
+	li $a1, 57
+	li $a2, 0
+	li $a3, 5
+	jal drawLineY
+	j respawnChar
+lastLife: # Removes last life
+	li $a0, 56
+	li $a1, 59
+	li $a2, 0
+	li $a3, 5
+	jal drawLineX
+	
+	li $a0, 58
+	li $a1, 57
+	li $a2, 0
+	li $a3, 5
+	jal drawLineY
+	j respawnChar
+midLife: # Removes middle life
+	li $a0, 48
+	li $a1, 59
+	li $a2, 0
+	li $a3, 5
+	jal drawLineX
+	
+	li $a0, 50
+	li $a1, 57
+	li $a2, 0
+	li $a3, 5
+	jal drawLineY
+	j respawnChar
+respawnChar:	# Create new character at starting x and y
 	jal createChar
 	lw $ra, 0($sp)
 	addi $sp, $sp, 4
@@ -203,9 +243,6 @@ moveRight:
 	li $t6, 4
 	div $t5, $t6
 	mflo $t5
-	
-	#mfhi $t5
-	#beq $t5, $zero, return
 
 	addi $t2, $t2, SPEED # Check right of top right
 	lw $t2, 0($t2)
@@ -319,6 +356,7 @@ fall:
 	j moveDown
 
 moveDown: 
+	li $s1, 0 # Unless changed, player has fallen off and died
 	la $t1, hitbox
 	lw $t2, 24($t1)
 	lw $t3, 28($t1)
@@ -326,9 +364,9 @@ moveDown:
 	
 	sub $t6, $t2, $t0
 	li $t5, 13568
-	bge $t6, $t5, return
+	bge $t6, $t5, return # Checks if player has fallen off
 	
-	li $v0, 1
+	li $s1, 1 # Player has not fallen off
 	addi $t2, $t2, 256 # Check bottom of bottom left
 	lw $t2, 0($t2)
 	bne $t2, 0, return
@@ -393,8 +431,51 @@ moveLoop: # Moves each hitbox address by value in $t3
 	bge $t2, $zero, moveLoop
 	jr $ra
 
+bulletsMove: # Bullets move right until collision. $t1=address of Bullets array, $t2=size of Bullets array
+	lw $t3, 0($t1) # $t3 = address of current bullet
+	addi $t4, $t3, 4 # $t4 = address of front of current bullet
+	lw $t5, 0($t4) # $t5 = Color of front of current bullet
+	bne $t5, 0, bulletCollision # Check for collision
+	sw $t4, 0($t1) # new address of bullet
+	li $t5, BULLETCOLOR
+	sw $t5, 0($t4) # Color head of bullet
+	addi $t4, $t3, -4 # pixel bullet has passed
+	sw $zero, 0($t4) # remove trail
+bulletsMoveEnd:
+	addi $t1, $t1, 4
+	addi $t2, $t2, -1
+	bne $t2, 0, bulletsMove
+	jr $ra
+	
+bulletCollision: # Bullet collides into an object and disappears. $t1=address of Bullets array, $t3=address of current bullet,$t5 = Color of object bullet has collided with
+	sw $zero, 0($t1) # Reset address in Bullets array
+	sw $zero, 0($t3)
+	sw $zero, -4($t3)
+	beq $t5, CHARCOLOR, bulletHit
+	j bulletsMoveEnd
+bulletHit: # Bullet collided with player
+	li $s1, 0 # Player is killed
+	j bulletsMoveEnd
+enemyFire: # Creates a bullet. $a0 = x, $a1 = y, $a2 = Current Bullets array
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
+	
+	# Save head of bullet in Bullets array
+	mul $t2, $a1, RESOLUTION # $t2 = y*Res
+	add $t3, $a0, 1 # $t3 = x + 1 for head of bullet
+	add $t2, $t2, $t3 # $t2 = x+1+y*Res 
+	mul $t2, $t2, 4 # $t2 = 4*(x+1+y*Res)
+	add $t2, $t2, $t0
+	sw $t2, 0($a2) 
+	li $a2, BULLETCOLOR
+	li $a3, 2
+	
+	jal drawLineX
 	
 	
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
+	jr $ra
 createChar: # Creates playable character.
 	lw $s1, CharX
 	lw $s2, CharY
@@ -461,8 +542,98 @@ setHitbox: # Saves next three horizontal addresses in hitbox. $a0=x, $a1=y, $s3=
 	add $a0, $a0, 1
 	j setHitbox
 	
+createEnemies: # Creates enemies
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
+	
+	la $s1, EnemyX
+	la $s2, EnemyY
+	lw $s3, EnemyNum
+	
+	jal drawEnemy
+	
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
+	jr $ra
+drawEnemy: # Draws Enemy
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)	
+	
+	lw $s5, 0($s1) # $t5 = Enemy x
+	lw $s6, 0($s2) # $t6 = enemy y
+	
+	addi $a0, $s5, -2
+	addi $a1, $s6, -1
+	li $a2, ENEMYTOPCOLOR
+	li $a3, 6
+	jal drawLineX
+	
+	addi $a0, $s5, -1
+	addi $a1, $s6, 0
+	li $a2, ENEMYBOTTOMCOLOR
+	li $a3, 3
+	jal drawLineX
+	
+	addi $a0, $s5, -1
+	addi $a1, $s6, 1
+	li $a2, ENEMYBOTTOMCOLOR
+	jal drawPixel
+	
+	addi $a0, $s5, 1
+	addi $a1, $s6, 1
+	li $a2, ENEMYBOTTOMCOLOR
+	jal drawPixel
+	
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
+	addi $s3, $s3, -1	
+	addi $s1, $s1, 4
+	addi $s2, $s2, 4
+	bgt $s3, 0, drawEnemy
+	jr $ra
+createLives:
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
 
-
+	li $a0, 56
+	li $a1, 59
+	li $a2, RED
+	li $a3, 5
+	jal drawLineX
+	
+	li $a0, 58
+	li $a1, 57
+	li $a2, RED
+	li $a3, 5
+	jal drawLineY
+	
+	li $a0, 48
+	li $a1, 59
+	li $a2, RED
+	li $a3, 5
+	jal drawLineX
+	
+	li $a0, 50
+	li $a1, 57
+	li $a2, RED
+	li $a3, 5
+	jal drawLineY
+	
+	li $a0, 40
+	li $a1, 59
+	li $a2, RED
+	li $a3, 5
+	jal drawLineX
+	
+	li $a0, 42
+	li $a1, 57
+	li $a2, RED
+	li $a3, 5
+	jal drawLineY
+	
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
+	jr $ra
 createPlatforms: # Creates platforms from platforms arrays. $a0=PlatformX,$a1=platformY,$a2=platformSize,$a3=PlatformLEN
 	bge $zero, $a3, return
 	
@@ -566,6 +737,23 @@ drawPixel:	#draws pixel on display. $a0=x,$a1=y,$a2=color
 	jr $ra
 return:	#returns to prior PC
 	jr $ra
-
+restart:
+	la $a0, BASE_ADDRESS
+	li $a1, 4096
+	li $a2, 0
+	jal fill
+	j main
+gameOver:
+	la $a0, BASE_ADDRESS
+	li $a1, 4096
+	li $a2, BLUE
+	jal fill
+	j end
+fill: # Fills the display with pixels. $a0=BASE_ADDRESS, $a1=Number of pixels, $a2=color to be filled in
+	sw $a2, 0($a0)
+	addi $a0, $a0, 4 	# advance to next pixel position in display
+	addi $a1, $a1, -1	# decrement number of pixels
+	bnez $a1, fill	# repeat while number of pixels is not zero
+	jr $ra
 end: 	li $v0, 10                  # terminate the program gracefully
 	syscall
