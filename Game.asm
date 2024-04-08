@@ -1,12 +1,37 @@
-# Bitmap display starter code
+#####################################################################
+#
+# CSCB58 Winter 2024 Assembly Final Project
+# University of Toronto, Scarborough
+#
+# Student: Kazi Samin, 1007818471, kazi.samin@mail.utoronto.ca
 #
 # Bitmap Display Configuration:
 # - Unit width in pixels: 4
 # - Unit height in pixels: 4
 # - Display width in pixels: 256
 # - Display height in pixels: 256
-# - Base Address for Display: 0x10008000 ($gp)
+# - Base Address for Display: 0x10008000
 #
+# Which milestones have been reached in this submission?
+# (See the assignment handout for descriptions of the milestones)
+# - Milestone 1,2,3 and 4 
+#
+# Which approved features have been implemented for milestone 3?
+# (See the assignment handout for the list of additional features)
+# 1. Shooting Enemies
+# 2. 3 Pickup Items
+# 3. Double Jump Ability
+#
+# Link to video demonstration for final submission:
+# - https://play.library.utoronto.ca/watch/1062f1411668b882665f9e213ceef871
+#
+# Are you OK with us sharing the video with people outside course staff?
+# - yes
+#
+# Any additional information that the TA needs to know:
+# - (write here, if any)
+#
+#####################################################################
 .data
 hitbox: .word 0:9
 hitboxLen: .word 9
@@ -14,14 +39,14 @@ EnemyX: .word 4,4
 EnemyY: .word 22, 38
 EnemyNum: .word 2
 Bullets: .word 0:2
-platformX: .word 1,1,11, 19, 24, 28, 16, 48,42
+platformX: .word 1,1,11, 19, 24, 28, 16, 47,42
 platformY: .word 24,40,48, 40, 24, 32, 16, 32,16
-platformSize: .word 6,6,10, 11, 8, 13, 13, 5,13
+platformSize: .word 6,6,10, 11, 8, 13, 13, 8,13
 platformLen: .word 9
 newline: .asciiz "\n"
 .eqv LIVES 2
 .eqv SPEED 4
-.eqv JUMP 10
+.eqv JUMP 12
 .eqv CHARX 12
 .eqv CHARY 45
 .eqv BASE_ADDRESS 0x10008000
@@ -32,9 +57,9 @@ newline: .asciiz "\n"
 .eqv DBLJUMPY 12
 .eqv DBLJUMPINDX 5
 .eqv DBLJUMPINDY 59
-.eqv SLEEP 70
-.eqv CENTERCOLOR CYAN
-.eqv CHARCOLOR BLUE
+.eqv SLEEP 64
+.eqv CENTERCOLOR 0x00ffff
+.eqv CHARCOLOR 0x0000ff
 .eqv HEALTHCOLOR RED
 .eqv DBLJUMPCOLOR GREEN
 .eqv ENDX 50
@@ -44,11 +69,10 @@ newline: .asciiz "\n"
 .eqv ENEMYTOPCOLOR 0x707070
 .eqv ENEMYBOTTOMCOLOR 0x9c5a3c
 .eqv BULLETCOLOR 0xb4b4b4
+.eqv WINCOLOR ENDCOLOR
 .eqv RED 0xff0000
 .eqv GREEN 0x00ff00
-.eqv BLUE 0x0000ff
-.eqv CYAN 0x00ffff
-.eqv PURPLE 0x6f3198
+.eqv ENDCOLOR 0x6f3198
 .eqv WHITE 0xffffff
 .globl main
 .text
@@ -101,11 +125,6 @@ main:	# Sets up the game
 	# Create Win Item
 	jal drawWinItem
 	
-	li $a0, CHARX
-	li $a1, 42
-	li $a2, BULLETCOLOR
-	jal drawPixel
-	
 	li $s2, 0 # $s2 = 0, Double jump has not been picked up
 	li $s3, 0 # $s3 = 0, Double Jump not available
 	#jal winItem 
@@ -156,7 +175,7 @@ skipGameWin:
 	jal gameOver
 skipGameLose:
 	li $v0, 32
-	li $a0, SLEEP # Wait 70 milliseconds
+	li $a0, SLEEP # Wait SLEEP milliseconds
 	syscall
 	j mainLoop
 keyPress: # Check for input
@@ -252,7 +271,7 @@ skipL1heal:
 	bne $t2, DBLJUMPCOLOR, skipL1Jump
 	jal doubleJump
 skipL1Jump:
-	bne $t2, PURPLE, skipL1Win
+	bne $t2, WINCOLOR, skipL1Win
 	jal win
 skipL1Win:
 	beq $t2, PLATFORMCOLOR, return
@@ -269,7 +288,7 @@ skipL2heal:
 	bne $t3, DBLJUMPCOLOR, skipL2jump
 	jal doubleJump
 skipL2jump:
-	bne $t3, PURPLE, skipL2Win
+	bne $t3, WINCOLOR, skipL2Win
 	jal win
 skipL2Win:
 	beq $t3, PLATFORMCOLOR, return
@@ -285,7 +304,7 @@ skipL3heal:
 	bne $t4, DBLJUMPCOLOR, skipL3jump
 	jal doubleJump
 skipL3jump:
-	bne $t4, PURPLE, skipL3Win
+	bne $t4, WINCOLOR, skipL3Win
 	jal win
 skipL3Win:
 	beq $t4, PLATFORMCOLOR, return
@@ -323,7 +342,7 @@ skipR1heal:
 	bne $t2, DBLJUMPCOLOR, skipR1Jump
 	jal doubleJump
 skipR1Jump:
-	bne $t2, PURPLE, skipR1Win
+	bne $t2, WINCOLOR, skipR1Win
 	jal win
 skipR1Win:
 	beq $t2, PLATFORMCOLOR, return
@@ -340,7 +359,7 @@ skipR2heal:
 	bne $t3, DBLJUMPCOLOR, skipR2jump
 	jal doubleJump
 skipR2jump:
-	bne $t3, PURPLE, skipR2Win
+	bne $t3, WINCOLOR, skipR2Win
 	jal win
 skipR2Win:
 	beq $t3, PLATFORMCOLOR, return
@@ -356,7 +375,7 @@ skipR3heal:
 	bne $t4, DBLJUMPCOLOR, skipR3jump
 	jal doubleJump
 skipR3jump:
-	bne $t4, PURPLE, skipR3Win
+	bne $t4, WINCOLOR, skipR3Win
 	jal win
 skipR3Win:
 	beq $t4, PLATFORMCOLOR, return
@@ -447,7 +466,7 @@ skipU1Heal:
 	bne $t2, DBLJUMPCOLOR, skipU1Jump
 	jal doubleJump
 skipU1Jump:
-	bne $t2, PURPLE, skipU1Win
+	bne $t2, WINCOLOR, skipU1Win
 	jal win
 skipU1Win:
 	la $t1, hitbox
@@ -464,7 +483,7 @@ skipU2Heal:
 	bne $t3, DBLJUMPCOLOR, skipU2Jump
 	jal doubleJump
 skipU2Jump:
-	bne $t3, PURPLE, skipU2Win
+	bne $t3, WINCOLOR, skipU2Win
 	jal win
 skipU2Win:
 	la $t1, hitbox
@@ -481,7 +500,7 @@ skipU3Heal:
 	bne $t4, DBLJUMPCOLOR, skipU3Jump
 	jal doubleJump
 skipU3Jump:
-	bne $t4, PURPLE, skipU3Win
+	bne $t4, WINCOLOR, skipU3Win
 	jal win
 skipU3Win:
 	li $a0, -256
@@ -526,7 +545,7 @@ skipD1Heal:
 	bne $t2, DBLJUMPCOLOR, skipD1Jump
 	jal doubleJump
 skipD1Jump:
-	bne $t2, PURPLE, skipD1Win
+	bne $t2, WINCOLOR, skipD1Win
 	jal win
 skipD1Win:
 	la $t1, hitbox
@@ -542,7 +561,7 @@ skipD2Heal:
 	bne $t3, DBLJUMPCOLOR, skipD2Jump
 	jal doubleJump
 skipD2Jump:
-	bne $t3, PURPLE, skipD2Win
+	bne $t3, WINCOLOR, skipD2Win
 	jal win
 skipD2Win:
 	la $t1, hitbox
@@ -558,7 +577,7 @@ skipD3Heal:
 	bne $t4, DBLJUMPCOLOR, skipD3Jump
 	jal doubleJump
 skipD3Jump:
-	bne $t4, PURPLE, skipD3Win
+	bne $t4, WINCOLOR, skipD3Win
 	jal win
 skipD3Win:
 	
@@ -666,7 +685,6 @@ enemyFire: # Creates a bullet. $a0 = x, $a1 = y, $a2 = Current Bullets array
 createChar: # Creates playable character.	
 	addi $sp, $sp, -4
 	sw $ra, 0($sp)
-	
 	la $s6, hitbox
 	
 	# Set top hitbox
@@ -694,7 +712,6 @@ createChar: # Creates playable character.
 	addi $a1, $t1, 1
 	li $t1, 0
 	jal setHitbox 
-	
 
 	# Create center
 	li $a0, CHARX
@@ -702,21 +719,13 @@ createChar: # Creates playable character.
 	li $a2, CENTERCOLOR
 	
 	jal drawPixel
-	
-	li $a0, CHARX
-	li $t1, CHARY
-	addi $a1, $t1, 1
-	li $a2, 0
-	
-	jal drawPixel
-	
+
 	lw $ra, 0($sp)
 	addi $sp, $sp, 4
 	jr $ra
 
 setHitbox: # Saves next three horizontal addresses in hitbox. $a0=x, $a1=y, $s6=hitbox, $t1=0
 	li $t2,8  # Include when t1=0,4 or 8; cannot increment further
-	li $t0, BASE_ADDRESS
 	
 	mul $t5, $a1, RESOLUTION
 	add $t5, $t5, $a0
@@ -792,18 +801,18 @@ addLives:
 addThirdLife:	
 	li $a0, 42
 	li $a1, 59
-	li $a2, RED
+	li $a2, HEALTHCOLOR
 	jal drawPickup
 addSecondLife:	
 	li $a0, 50
 	li $a1, 59
-	li $a2, RED
+	li $a2, HEALTHCOLOR
 	jal drawPickup
 
 addFirstLife:
 	li $a0, 58
 	li $a1, 59
-	li $a2, RED
+	li $a2, HEALTHCOLOR
 	jal drawPickup
 	
 	lw $ra, 0($sp)
@@ -920,7 +929,6 @@ drawLineY_loop:
 	jr $ra
 
 drawPixel:	#draws pixel on display. $a0=x,$a1=y,$a2=color
-	li $t0 BASE_ADDRESS
 	mul $t5, $a1, RESOLUTION
 	add $t5, $a0, $t5 # $t5 holds address of the pixel
 	mul $t5, $t5, 4
@@ -996,31 +1004,31 @@ drawWinItem:
 	
 	addi $a0, $s1, -2
 	addi $a1, $s2, -2
-	li $a2, PURPLE
+	li $a2, WINCOLOR
 	li $a3, 5
 	jal drawLineX
 	
 	addi $a0, $s1, -2
 	addi $a1, $s2, -2
-	li $a2, PURPLE
+	li $a2, WINCOLOR
 	li $a3, 5
 	jal drawLineY
 	
 	addi $a0, $s1, 2
 	addi $a1, $s2, -2
-	li $a2, PURPLE
+	li $a2, WINCOLOR
 	li $a3, 5
 	jal drawLineY
 	
 	addi $a0, $s1, -2
 	addi $a1, $s2, 2
-	li $a2, PURPLE
+	li $a2, WINCOLOR
 	li $a3, 5
 	jal drawLineX
 	
 	move $a0, $s1
 	move $a1, $s2
-	li $a2, PURPLE
+	li $a2, WINCOLOR
 	jal drawPixel
 	lw $ra, 0($sp)
 	addi $sp, $sp, 4
@@ -1028,12 +1036,6 @@ drawWinItem:
 win:
 	li $s4, 1
 	jr $ra
-winScreen:
-	la $a0, BASE_ADDRESS
-	li $a1, 4096
-	li $a2, GREEN
-	jal fill
-	j end
 restart:
 	la $a0, BASE_ADDRESS
 	li $a1, 4096
