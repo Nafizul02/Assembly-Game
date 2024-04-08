@@ -10,16 +10,16 @@
 .data
 hitbox: .word 0:9
 hitboxLen: .word 9
+Lives: .word 2
 EnemyX: .word 4,4
 EnemyY: .word 22, 38
 EnemyNum: .word 2
 Bullets: .word 0:2
 platformX: .word 1,1,11, 19, 24, 28, 16, 48,42
 platformY: .word 24,40,48, 40, 24, 32, 16, 32,16
-platformSize: .word 6,6,10, 11, 8, 13, 13, 5,13
+platformSize: .word 6,6,10, 11, 8, 13, 13, 5,7
 platformLen: .word 9
 newline: .asciiz "\n"
-.eqv LIVES 2
 .eqv SPEED 4
 .eqv JUMP 10
 .eqv CHARX 12
@@ -29,7 +29,7 @@ newline: .asciiz "\n"
 .eqv HEALTHX 50
 .eqv HEALTHY 28
 .eqv DBLJUMPX 22
-.eqv DBLJUMPY 12
+.eqv DBLJUMPY 10
 .eqv DBLJUMPINDX 5
 .eqv DBLJUMPINDY 59
 .eqv SLEEP 70
@@ -37,8 +37,6 @@ newline: .asciiz "\n"
 .eqv CHARCOLOR BLUE
 .eqv HEALTHCOLOR RED
 .eqv DBLJUMPCOLOR GREEN
-.eqv ENDX 50
-.eqv ENDY 12
 .eqv BORDERCOLOR 0xe6cc00
 .eqv PLATFORMCOLOR 0xD16002
 .eqv ENEMYTOPCOLOR 0x707070
@@ -48,8 +46,6 @@ newline: .asciiz "\n"
 .eqv GREEN 0x00ff00
 .eqv BLUE 0x0000ff
 .eqv CYAN 0x00ffff
-.eqv PURPLE 0x6f3198
-.eqv WHITE 0xffffff
 .globl main
 .text
 main:	# Sets up the game
@@ -86,7 +82,7 @@ main:	# Sets up the game
 	# Create Enemies
 	jal createEnemies
 	# Create Lives
-	li $s0, LIVES # $s0 = number of lives in current game, lose if = -1
+	lw $s0, Lives # $s0 = number of lives in current game
 	jal addLives
 	# Create Health Pickup
 	li $a0, HEALTHX
@@ -98,19 +94,10 @@ main:	# Sets up the game
 	li $a1, DBLJUMPY
 	li $a2, DBLJUMPCOLOR
 	jal drawPickup
-	# Create Win Item
-	jal drawWinItem
-	
-	li $a0, CHARX
-	li $a1, 42
-	li $a2, BULLETCOLOR
-	jal drawPixel
-	
 	li $s2, 0 # $s2 = 0, Double jump has not been picked up
-	li $s3, 0 # $s3 = 0, Double Jump not available
+	li $s3, 0 # $s4 = 0, Double Jump not available
 	#jal winItem 
-	li $s4, 0 # $s4 = 0, Win Item has not been picked up
-	li $s5, 0 # $s5 = 0, Game is not over
+	li $s4, 0 # $s5 = 0, Win Item has not been picked up
 	
 mainLoop: # main loop of the game
 	li $s1, 1 # $s1 = 1;character has not collided with bullet nor fallen off
@@ -119,8 +106,6 @@ mainLoop: # main loop of the game
 	bne $t8, 1, skipKey
 	jal keyPress
 skipKey:
-	beq $s5, 1, mainLoop # If game is over, only check for inputs
-
 	li $v0, 0
 	jal fall
 	
@@ -149,24 +134,15 @@ skipEnemy2:
 	beq $s1, 1, skipDeath
 	jal death
 skipDeath:
-	beq $s4, 0, skipGameWin
-	jal gameOver
-skipGameWin:
-	bge $s0, 0, skipGameLose
-	jal gameOver
-skipGameLose:
 	li $v0, 32
 	li $a0, SLEEP # Wait 70 milliseconds
 	syscall
 	j mainLoop
 keyPress: # Check for input
 	lw $t2, 4($t9) 
-	beq $s5, 1, noInput
-	
 	beq $t2, 0x61, moveLeft # a = left
 	beq $t2, 0x64, moveRight # d = right
 	beq $t2, 0x77, jumpCheck # w = jump
-noInput: # If game is over, other inputs are not registered
 	beq $t2, 0x72, restart # r = reset
 	beq $t2, 0x71, end # q = quit
 	jr $ra
@@ -186,13 +162,11 @@ death_loop: # Remove color of each hitbox
 	ble $t2, $t6, death_loop
 	
 removeLife: # Removes a life from the screen
-	addi $s0, $s0, -1
-	bge $s0, 0, playOn
-	li $s0, -1
-	jr $ra
-playOn:
 	addi $sp, $sp, -4
 	sw $ra, 0($sp)
+	
+	addi $s0, $s0, -1
+	blt $s0, 0, gameOver
 	beq $s0, 0, lastLife
 	beq $s0, 1, midLife
 	# Remove First life
@@ -252,9 +226,6 @@ skipL1heal:
 	bne $t2, DBLJUMPCOLOR, skipL1Jump
 	jal doubleJump
 skipL1Jump:
-	bne $t2, PURPLE, skipL1Win
-	jal win
-skipL1Win:
 	beq $t2, PLATFORMCOLOR, return
 	beq $t2, BORDERCOLOR, return
 	beq $t2, ENEMYTOPCOLOR, return
@@ -268,9 +239,6 @@ skipL2heal:
 	bne $t3, DBLJUMPCOLOR, skipL2jump
 	jal doubleJump
 skipL2jump:
-	bne $t3, PURPLE, skipL2Win
-	jal win
-skipL2Win:
 	beq $t3, PLATFORMCOLOR, return
 	beq $t3, ENEMYTOPCOLOR, return
 	la $t1, hitbox
@@ -283,9 +251,6 @@ skipL3heal:
 	bne $t4, DBLJUMPCOLOR, skipL3jump
 	jal doubleJump
 skipL3jump:
-	bne $t4, PURPLE, skipL3Win
-	jal win
-skipL3Win:
 	beq $t4, PLATFORMCOLOR, return
 	beq $t4, ENEMYTOPCOLOR, return
 	li $a0, -SPEED
@@ -320,9 +285,6 @@ skipR1heal:
 	bne $t2, DBLJUMPCOLOR, skipR1Jump
 	jal doubleJump
 skipR1Jump:
-	bne $t2, PURPLE, skipR1Win
-	jal win
-skipR1Win:
 	beq $t2, PLATFORMCOLOR, return
 	beq $t2, BORDERCOLOR, return
 	beq $t2, ENEMYTOPCOLOR, return
@@ -336,9 +298,6 @@ skipR2heal:
 	bne $t3, DBLJUMPCOLOR, skipR2jump
 	jal doubleJump
 skipR2jump:
-	bne $t3, PURPLE, skipR2Win
-	jal win
-skipR2Win:
 	beq $t3, PLATFORMCOLOR, return
 	beq $t3, ENEMYTOPCOLOR, return
 	la $t1, hitbox
@@ -351,9 +310,6 @@ skipR3heal:
 	bne $t4, DBLJUMPCOLOR, skipR3jump
 	jal doubleJump
 skipR3jump:
-	bne $t4, PURPLE, skipR3Win
-	jal win
-skipR3Win:
 	beq $t4, PLATFORMCOLOR, return
 	beq $t4, ENEMYTOPCOLOR, return
 	li $a0, 4
@@ -441,9 +397,6 @@ skipU1Heal:
 	bne $t2, DBLJUMPCOLOR, skipU1Jump
 	jal doubleJump
 skipU1Jump:
-	bne $t2, PURPLE, skipU1Win
-	jal win
-skipU1Win:
 	la $t1, hitbox
 	lw $t3, 4($t1)
 	addi $t3, $t3, -256 # Check up of top middle
@@ -458,9 +411,6 @@ skipU2Heal:
 	bne $t3, DBLJUMPCOLOR, skipU2Jump
 	jal doubleJump
 skipU2Jump:
-	bne $t3, PURPLE, skipU2Win
-	jal win
-skipU2Win:
 	la $t1, hitbox
 	lw $t4, 8($t1)
 	addi $t4, $t4, -256 # Check up of top right
@@ -475,9 +425,6 @@ skipU3Heal:
 	bne $t4, DBLJUMPCOLOR, skipU3Jump
 	jal doubleJump
 skipU3Jump:
-	bne $t4, PURPLE, skipU3Win
-	jal win
-skipU3Win:
 	li $a0, -256
 	jal updateChar
 	
@@ -517,9 +464,6 @@ skipD1Heal:
 	bne $t2, DBLJUMPCOLOR, skipD1Jump
 	jal doubleJump
 skipD1Jump:
-	bne $t2, PURPLE, skipD1Win
-	jal win
-skipD1Win:
 	la $t1, hitbox
 	lw $t3, 28($t1)
 	addi $t3, $t3, 256 # Check bottom of bottom middle
@@ -533,9 +477,6 @@ skipD2Heal:
 	bne $t3, DBLJUMPCOLOR, skipD2Jump
 	jal doubleJump
 skipD2Jump:
-	bne $t3, PURPLE, skipD2Win
-	jal win
-skipD2Win:
 	la $t1, hitbox
 	lw $t4, 32($t1)	
 	addi $t4, $t4, 256 # Check bottom of bottom right
@@ -549,9 +490,6 @@ skipD3Heal:
 	bne $t4, DBLJUMPCOLOR, skipD3Jump
 	jal doubleJump
 skipD3Jump:
-	bne $t4, PURPLE, skipD3Win
-	jal win
-skipD3Win:
 	
 	# Player has nothing under it. So it keeps falling
 	li $a0, 256
@@ -974,50 +912,10 @@ skipColor:
 	
 takeDamage: # Player takes damage and loses a life
 	li $s1, 0
-restoreStackAndReturn: # Restores stack and returns
+restoreStackAndReturn:
 	lw $ra, 0($sp)
 	addi $sp, $sp, 4
 return:	#returns to prior PC
-	jr $ra
-drawWinItem:
-	addi $sp, $sp, -4
-	sw $ra, 0($sp)
-	li $s1, ENDX
-	li $s2, ENDY
-	
-	addi $a0, $s1, -2
-	addi $a1, $s2, -2
-	li $a2, PURPLE
-	li $a3, 5
-	jal drawLineX
-	
-	addi $a0, $s1, -2
-	addi $a1, $s2, -2
-	li $a2, PURPLE
-	li $a3, 5
-	jal drawLineY
-	
-	addi $a0, $s1, 2
-	addi $a1, $s2, -2
-	li $a2, PURPLE
-	li $a3, 5
-	jal drawLineY
-	
-	addi $a0, $s1, -2
-	addi $a1, $s2, 2
-	li $a2, PURPLE
-	li $a3, 5
-	jal drawLineX
-	
-	move $a0, $s1
-	move $a1, $s2
-	li $a2, PURPLE
-	jal drawPixel
-	lw $ra, 0($sp)
-	addi $sp, $sp, 4
-	jr $ra
-win:
-	li $s4, 1
 	jr $ra
 winScreen:
 	la $a0, BASE_ADDRESS
@@ -1029,283 +927,14 @@ restart:
 	la $a0, BASE_ADDRESS
 	li $a1, 4096
 	li $a2, 0
-	la $t1, Bullets
-	sw $zero, 0($t1)
-	sw $zero, 4($t1)
 	jal fill
 	j main
 gameOver:
-	li $s5, 1
-	addi $sp, $sp, -4
-	sw $ra, 0($sp)
 	la $a0, BASE_ADDRESS
 	li $a1, 4096
-	beq $s4,1, gameWin
 	li $a2, RED
 	jal fill
-	jal printYOU
-	jal printLOSE
-	lw $ra, 0($sp)
-	addi $sp, $sp, 4
-
-	jr $ra
-gameWin:
-	li $a2, GREEN
-	jal fill	
-	jal printYOU
-	jal printWIN
-	lw $ra, 0($sp)
-	addi $sp, $sp, 4
-	jr $ra
-printYOU:
-	addi $sp, $sp, -4
-	sw $ra, 0($sp)
-	
-	li $a0, 10
-	li $a1, 10
-	li $a2, WHITE
-	li $a3, 6
-	jal drawLineY
-	li $a0, 10
-	li $a1, 16
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	li $a0, 20
-	li $a1, 10
-	li $a2, WHITE
-	li $a3, 6
-	jal drawLineY
-	li $a0, 15
-	li $a1, 16
-	li $a2, WHITE
-	li $a3, 10
-	jal drawLineY
-	
-	li $a0, 25
-	li $a1, 10
-	li $a2, WHITE
-	li $a3, 15
-	jal drawLineY
-	li $a0, 25
-	li $a1, 10
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	li $a0, 25
-	li $a1, 25
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	li $a0, 35
-	li $a1, 10
-	li $a2, WHITE
-	li $a3, 15
-	jal drawLineY
-	
-	li $a0, 40
-	li $a1, 10
-	li $a2, WHITE
-	li $a3, 15
-	jal drawLineY
-	li $a0, 40
-	li $a1, 25
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	li $a0, 50
-	li $a1, 10
-	li $a2, WHITE
-	li $a3, 15
-	jal drawLineY
-	
-	lw $ra, 0($sp)
-	addi $sp, $sp, 4
-	jr $ra
-	
-printLOSE:
-	addi $sp, $sp, -4
-	sw $ra, 0($sp)
-	
-	li $a0, 5
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 15
-	jal drawLineY
-	li $a0, 5
-	li $a1, 50
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	
-	li $a0, 20
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 15
-	jal drawLineY
-	li $a0, 20
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	li $a0, 20
-	li $a1, 50
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	li $a0, 30
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 15
-	jal drawLineY
-	
-	li $a0, 35
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	li $a0, 35
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 8
-	jal drawLineY
-	li $a0, 35
-	li $a1, 42
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	li $a0, 45
-	li $a1, 42
-	li $a2, WHITE
-	li $a3, 8
-	jal drawLineY
-	li $a0, 35
-	li $a1, 50
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	
-	
-	li $a0, 50
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 15
-	jal drawLineY
-	li $a0, 50
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	li $a0, 50
-	li $a1, 42
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	li $a0, 50
-	li $a1, 50
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	
-	lw $ra, 0($sp)
-	addi $sp, $sp, 4
-	jr $ra
-printWIN:
-	addi $sp, $sp, -4
-	sw $ra, 0($sp)
-	
-	li $a0, 10
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 15
-	jal drawLineY
-	li $a0, 10
-	li $a1, 50
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	li $a0, 15
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 15
-	jal drawLineY
-	li $a0, 20
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 15
-	jal drawLineY
-	
-	li $a0, 25
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-	li $a0, 30
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 15
-	jal drawLineY
-	li $a0, 25
-	li $a1, 50
-	li $a2, WHITE
-	li $a3, 11
-	jal drawLineX
-
-	li $a0, 40
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 16
-	jal drawLineY
-	li $a0, 49
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 16
-	jal drawLineY
-	li $a0, 41
-	li $a1, 35
-	li $a2, WHITE
-	li $a3, 2
-	jal drawLineY
-	li $a0, 42
-	li $a1, 37
-	li $a2, WHITE
-	li $a3, 2
-	jal drawLineY
-	li $a0, 43
-	li $a1, 39
-	li $a2, WHITE
-	li $a3, 2
-	jal drawLineY
-	li $a0, 44
-	li $a1, 41
-	li $a2, WHITE
-	li $a3, 2
-	jal drawLineY
-
-	li $a0, 45
-	li $a1, 43
-	li $a2, WHITE
-	li $a3, 2
-	jal drawLineY
-	li $a0, 46
-	li $a1, 45
-	li $a2, WHITE
-	li $a3, 2
-	jal drawLineY
-	li $a0, 47
-	li $a1, 47
-	li $a2, WHITE
-	li $a3, 2
-	jal drawLineY
-	li $a0, 48
-	li $a1, 49
-	li $a2, WHITE
-	li $a3, 2
-	jal drawLineY
-	
-	lw $ra, 0($sp)
-	addi $sp, $sp, 4
-	jr $ra
+	j end
 fill: # Fills the display with pixels. $a0=BASE_ADDRESS, $a1=Number of pixels, $a2=color to be filled in
 	sw $a2, 0($a0)
 	addi $a0, $a0, 4 	# advance to next pixel position in display
