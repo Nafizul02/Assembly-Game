@@ -10,25 +10,35 @@
 .data
 hitbox: .word 0:9
 hitboxLen: .word 9
-CharX: .word 12
-CharY: .word 40
-Lives: .word 3
 EnemyX: .word 4,4
 EnemyY: .word 22, 38
 EnemyNum: .word 2
 Bullets: .word 0:2
-platformX: .word 1,1,11, 19, 24, 28, 16, 48,45
+platformX: .word 1,1,11, 19, 24, 28, 16, 48,42
 platformY: .word 24,40,48, 40, 24, 32, 16, 32,16
-platformSize: .word 6,6,10, 11, 8, 13, 13, 5,7
+platformSize: .word 6,6,10, 11, 8, 13, 13, 5,13
 platformLen: .word 9
 newline: .asciiz "\n"
+.eqv LIVES 2
 .eqv SPEED 4
-.eqv JUMP 15
+.eqv JUMP 10
+.eqv CHARX 12
+.eqv CHARY 45
 .eqv BASE_ADDRESS 0x10008000
 .eqv RESOLUTION 64
-
+.eqv HEALTHX 50
+.eqv HEALTHY 28
+.eqv DBLJUMPX 22
+.eqv DBLJUMPY 12
+.eqv DBLJUMPINDX 5
+.eqv DBLJUMPINDY 59
+.eqv SLEEP 70
 .eqv CENTERCOLOR CYAN
-.eqv CHARCOLOR RED
+.eqv CHARCOLOR BLUE
+.eqv HEALTHCOLOR RED
+.eqv DBLJUMPCOLOR GREEN
+.eqv ENDX 50
+.eqv ENDY 12
 .eqv BORDERCOLOR 0xe6cc00
 .eqv PLATFORMCOLOR 0xD16002
 .eqv ENEMYTOPCOLOR 0x707070
@@ -38,6 +48,8 @@ newline: .asciiz "\n"
 .eqv GREEN 0x00ff00
 .eqv BLUE 0x0000ff
 .eqv CYAN 0x00ffff
+.eqv PURPLE 0x6f3198
+.eqv WHITE 0xffffff
 .globl main
 .text
 main:	# Sets up the game
@@ -74,15 +86,41 @@ main:	# Sets up the game
 	# Create Enemies
 	jal createEnemies
 	# Create Lives
-	jal createLives
-	lw $s0, Lives
+	li $s0, LIVES # $s0 = number of lives in current game, lose if = -1
+	jal addLives
+	# Create Health Pickup
+	li $a0, HEALTHX
+	li $a1, HEALTHY
+	li $a2, HEALTHCOLOR
+	jal drawPickup
+	# Create Double Jump Pickup
+	li $a0, DBLJUMPX
+	li $a1, DBLJUMPY
+	li $a2, DBLJUMPCOLOR
+	jal drawPickup
+	# Create Win Item
+	jal drawWinItem
+	
+	li $a0, CHARX
+	li $a1, 42
+	li $a2, BULLETCOLOR
+	jal drawPixel
+	
+	li $s2, 0 # $s2 = 0, Double jump has not been picked up
+	li $s3, 0 # $s3 = 0, Double Jump not available
+	#jal winItem 
+	li $s4, 0 # $s4 = 0, Win Item has not been picked up
+	li $s5, 0 # $s5 = 0, Game is not over
+	
 mainLoop: # main loop of the game
-	li $s1, 1 # $s1 = character has not collided with bullet nor fallen off
+	li $s1, 1 # $s1 = 1;character has not collided with bullet nor fallen off
 	li $t9, 0xffff0000
 	lw $t8, 0($t9)
 	bne $t8, 1, skipKey
 	jal keyPress
 skipKey:
+	beq $s5, 1, mainLoop # If game is over, only check for inputs
+
 	li $v0, 0
 	jal fall
 	
@@ -111,16 +149,24 @@ skipEnemy2:
 	beq $s1, 1, skipDeath
 	jal death
 skipDeath:
+	beq $s4, 0, skipGameWin
+	jal gameOver
+skipGameWin:
+	bge $s0, 0, skipGameLose
+	jal gameOver
+skipGameLose:
 	li $v0, 32
-	li $a0, 120 # Wait 120 milliseconds
+	li $a0, SLEEP # Wait 70 milliseconds
 	syscall
 	j mainLoop
 keyPress: # Check for input
 	lw $t2, 4($t9) 
-	li $a0, JUMP
+	beq $s5, 1, noInput
+	
 	beq $t2, 0x61, moveLeft # a = left
 	beq $t2, 0x64, moveRight # d = right
 	beq $t2, 0x77, jumpCheck # w = jump
+noInput: # If game is over, other inputs are not registered
 	beq $t2, 0x72, restart # r = reset
 	beq $t2, 0x71, end # q = quit
 	jr $ra
@@ -140,11 +186,13 @@ death_loop: # Remove color of each hitbox
 	ble $t2, $t6, death_loop
 	
 removeLife: # Removes a life from the screen
+	addi $s0, $s0, -1
+	bge $s0, 0, playOn
+	li $s0, -1
+	jr $ra
+playOn:
 	addi $sp, $sp, -4
 	sw $ra, 0($sp)
-	
-	addi $s0, $s0, -1
-	blt $s0, 0, gameOver
 	beq $s0, 0, lastLife
 	beq $s0, 1, midLife
 	# Remove First life
@@ -185,39 +233,64 @@ midLife: # Removes middle life
 	li $a2, 0
 	li $a3, 5
 	jal drawLineY
-	j respawnChar
 respawnChar:	# Create new character at starting x and y
 	jal createChar
 	lw $ra, 0($sp)
 	addi $sp, $sp, 4
 	jr $ra	
 moveLeft:
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
 	la $t1, hitbox
 	lw $t2, 0($t1)
-	lw $t3, 12($t1)
-	lw $t4, 24($t1)
-	li $t5, 256
-	sub $t6, $t2, $t0
-	div $t6, $t5
-	
-	mfhi $t5
-	beq $t5, $zero, return
 	
 	addi $t2, $t2, -SPEED # Check left of top left
 	lw $t2, 0($t2)
-	bne $t2, 0, return
-	
+	bne $t2, HEALTHCOLOR, skipL1heal
+	jal heal
+skipL1heal:
+	bne $t2, DBLJUMPCOLOR, skipL1Jump
+	jal doubleJump
+skipL1Jump:
+	bne $t2, PURPLE, skipL1Win
+	jal win
+skipL1Win:
+	beq $t2, PLATFORMCOLOR, return
+	beq $t2, BORDERCOLOR, return
+	beq $t2, ENEMYTOPCOLOR, return
+	la $t1, hitbox
+	lw $t3, 12($t1)
 	addi $t3, $t3, -SPEED # Check left of middle left
 	lw $t3, 0($t3)
-	bne $t3, 0, return
-	
+	bne $t3, HEALTHCOLOR, skipL2heal
+	jal heal
+skipL2heal:
+	bne $t3, DBLJUMPCOLOR, skipL2jump
+	jal doubleJump
+skipL2jump:
+	bne $t3, PURPLE, skipL2Win
+	jal win
+skipL2Win:
+	beq $t3, PLATFORMCOLOR, return
+	beq $t3, ENEMYTOPCOLOR, return
+	la $t1, hitbox
+	lw $t4, 24($t1)
 	addi $t4, $t4, -SPEED # Check left of bottom left
 	lw $t4, 0($t4)
-	bne $t4, 0, return
+	bne $t4, HEALTHCOLOR, skipL3heal
+	jal heal
+skipL3heal:
+	bne $t4, DBLJUMPCOLOR, skipL3jump
+	jal doubleJump
+skipL3jump:
+	bne $t4, PURPLE, skipL3Win
+	jal win
+skipL3Win:
+	beq $t4, PLATFORMCOLOR, return
+	beq $t4, ENEMYTOPCOLOR, return
 	li $a0, -SPEED
+	la $t1, hitbox
 	
-	addi $sp, $sp, -4
-	sw $ra, 0($sp)
 	jal updateChar
 	
 	lw $t2, 8($t1)
@@ -234,31 +307,57 @@ moveLeft:
 	addi $sp, $sp, 4
 	jr $ra
 moveRight:
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
 	la $t1, hitbox
 	lw $t2, 8($t1)
-	lw $t3, 20($t1)
-	lw $t4, 32($t1)
-	
-	sub $t5, $t2, $t0
-	li $t6, 4
-	div $t5, $t6
-	mflo $t5
 
 	addi $t2, $t2, SPEED # Check right of top right
 	lw $t2, 0($t2)
-	bne $t2, 0, return
-	
-	addi $t3, $t3, SPEED # Check left of middle right
+	bne $t2, HEALTHCOLOR, skipR1heal
+	jal heal
+skipR1heal:
+	bne $t2, DBLJUMPCOLOR, skipR1Jump
+	jal doubleJump
+skipR1Jump:
+	bne $t2, PURPLE, skipR1Win
+	jal win
+skipR1Win:
+	beq $t2, PLATFORMCOLOR, return
+	beq $t2, BORDERCOLOR, return
+	beq $t2, ENEMYTOPCOLOR, return
+	la $t1, hitbox
+	lw $t3, 20($t1)
+	addi $t3, $t3, SPEED # Check right of middle right
 	lw $t3, 0($t3)
-	bne $t3, 0, return
-	
-	addi $t4, $t4, SPEED # Check left of bottom right
+	bne $t3, HEALTHCOLOR, skipR2heal
+	jal heal
+skipR2heal:
+	bne $t3, DBLJUMPCOLOR, skipR2jump
+	jal doubleJump
+skipR2jump:
+	bne $t3, PURPLE, skipR2Win
+	jal win
+skipR2Win:
+	beq $t3, PLATFORMCOLOR, return
+	beq $t3, ENEMYTOPCOLOR, return
+	la $t1, hitbox
+	lw $t4, 32($t1)
+	addi $t4, $t4, SPEED # Check right of bottom right
 	lw $t4, 0($t4)
-	bne $t4, 0, return
+	bne $t4, HEALTHCOLOR, skipR3heal
+	jal heal
+skipR3heal:
+	bne $t4, DBLJUMPCOLOR, skipR3jump
+	jal doubleJump
+skipR3jump:
+	bne $t4, PURPLE, skipR3Win
+	jal win
+skipR3Win:
+	beq $t4, PLATFORMCOLOR, return
+	beq $t4, ENEMYTOPCOLOR, return
 	li $a0, 4
-	
-	addi $sp, $sp, -4
-	sw $ra, 0($sp)
+
 	jal updateChar
 	
 	lw $t2, 0($t1)
@@ -274,69 +373,112 @@ moveRight:
 	lw $ra, 0($sp)
 	addi $sp, $sp, 4
 	jr $ra
-jumpCheck: # Checks if character is airborne
+jumpCheck: # Checks if character can jump
+	
+	beq $s2, 0, skipExtraJump # Double Jump not obtained
+	beq $s3, 0, skipExtraJump # no jumps remaining
+	beq $s3, 1, startJump # One jump left
+skipExtraJump:
+	beq $s3, 0, return
 	la $t1, hitbox
 	lw $t2, 24($t1)
 	lw $t3, 28($t1)
 	lw $t4, 32($t1)	
-	
-	sub $t6, $t2, $t0
-	li $t5, 256
-	blt $t6, $t5, return
 
 	addi $t2, $t2, 256 # Check bottom of bottom left
 	lw $t2, 0($t2)
-	bne $t2, 0, jump
+	beq $t2, PLATFORMCOLOR, startJump
+	beq $t2, ENEMYTOPCOLOR, startJump
 	
 	addi $t3, $t3, 256 # Check bottom of bottom middle
 	lw $t3, 0($t3)
-	bne $t3, 0, jump
+	beq $t3, PLATFORMCOLOR, startJump
+	beq $t3, ENEMYTOPCOLOR, startJump
 	
 	addi $t4, $t4, 256 # Check bottom of bottom right
 	lw $t4, 0($t4)
-	bne $t4, 0, jump
+	beq $t4, PLATFORMCOLOR, startJump
+	beq $t4, ENEMYTOPCOLOR, startJump
 	jr $ra
-	
+startJump: # Deducts a jump from $s3 and initiates jump
+	addi $s3, $s3, -1
+	li $s7, JUMP
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
+	jal changeColor
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
 jump: # Jump for JUMP iterations
 	addi $sp, $sp, -4
-	sw $a0, 0($sp)
+	sw $s7, 0($sp)
 	addi $sp, $sp, -4
 	sw $ra, 0($sp)
 	jal moveUp
 	
 	lw $ra, 0($sp)
 	addi $sp, $sp, 4
-	lw $a0, 0($sp)
+	lw $s7, 0($sp)
 	addi $sp, $sp, 4
-	subi $a0, $a0, 1
-	bne $a0, $zero, jump
+	addi $s7, $s7, -1
+	bge $s7, $zero, jump
 	jr $ra
 
 moveUp: # Move up one pixel to jump
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
 	la $t1, hitbox
-	lw $t2, 0($t1)
-	lw $t3, 4($t1)
-	lw $t4, 8($t1)	
-	
-	sub $t6, $t2, $t0
-	li $t5, 256
-	blt $t6, $t5, return
+	lw $t2, 0($t1)		
 
 	addi $t2, $t2, -256 # Check up of top left
 	lw $t2, 0($t2)
-	bne $t2, 0, return
-	
+	beq $t2, BULLETCOLOR, takeDamage
+	beq $t2, PLATFORMCOLOR, restoreStackAndReturn
+	beq $t2, BORDERCOLOR, restoreStackAndReturn
+	beq $t2, ENEMYTOPCOLOR, restoreStackAndReturn
+	bne $t2, HEALTHCOLOR, skipU1Heal
+	jal heal
+skipU1Heal:
+	bne $t2, DBLJUMPCOLOR, skipU1Jump
+	jal doubleJump
+skipU1Jump:
+	bne $t2, PURPLE, skipU1Win
+	jal win
+skipU1Win:
+	la $t1, hitbox
+	lw $t3, 4($t1)
 	addi $t3, $t3, -256 # Check up of top middle
 	lw $t3, 0($t3)
-	bne $t3, 0, return
-	
-	addi $t4, $t4, -256 # Check left of top right
+	beq $t3, BULLETCOLOR, takeDamage
+	beq $t3, PLATFORMCOLOR, restoreStackAndReturn
+	beq $t3, BORDERCOLOR, restoreStackAndReturn
+	beq $t3, ENEMYTOPCOLOR, restoreStackAndReturn
+	bne $t3, HEALTHCOLOR, skipU2Heal
+	jal heal
+skipU2Heal:
+	bne $t3, DBLJUMPCOLOR, skipU2Jump
+	jal doubleJump
+skipU2Jump:
+	bne $t3, PURPLE, skipU2Win
+	jal win
+skipU2Win:
+	la $t1, hitbox
+	lw $t4, 8($t1)
+	addi $t4, $t4, -256 # Check up of top right
 	lw $t4, 0($t4)
-	bne $t4, 0, return
+	beq $t4, BULLETCOLOR, takeDamage
+	beq $t4, PLATFORMCOLOR, restoreStackAndReturn
+	beq $t4, BORDERCOLOR, restoreStackAndReturn
+	beq $t4, ENEMYTOPCOLOR, restoreStackAndReturn
+	bne $t4, HEALTHCOLOR, skipU3Heal
+	jal heal
+skipU3Heal:
+	bne $t4, DBLJUMPCOLOR, skipU3Jump
+	jal doubleJump
+skipU3Jump:
+	bne $t4, PURPLE, skipU3Win
+	jal win
+skipU3Win:
 	li $a0, -256
-	
-	addi $sp, $sp, -4
-	sw $ra, 0($sp)
 	jal updateChar
 	
 	lw $t2, 24($t1)
@@ -352,15 +494,12 @@ moveUp: # Move up one pixel to jump
 	lw $ra, 0($sp)
 	addi $sp, $sp, 4
 	jr $ra
-fall:
-	j moveDown
-
-moveDown: 
+fall: 
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
 	li $s1, 0 # Unless changed, player has fallen off and died
 	la $t1, hitbox
 	lw $t2, 24($t1)
-	lw $t3, 28($t1)
-	lw $t4, 32($t1)	
 	
 	sub $t6, $t2, $t0
 	li $t5, 13568
@@ -369,19 +508,53 @@ moveDown:
 	li $s1, 1 # Player has not fallen off
 	addi $t2, $t2, 256 # Check bottom of bottom left
 	lw $t2, 0($t2)
-	bne $t2, 0, return
-	
+	beq $t2, BULLETCOLOR, takeDamage
+	beq $t2, PLATFORMCOLOR, land
+	beq $t2, ENEMYTOPCOLOR, land
+	bne $t2, HEALTHCOLOR, skipD1Heal
+	jal heal
+skipD1Heal:
+	bne $t2, DBLJUMPCOLOR, skipD1Jump
+	jal doubleJump
+skipD1Jump:
+	bne $t2, PURPLE, skipD1Win
+	jal win
+skipD1Win:
+	la $t1, hitbox
+	lw $t3, 28($t1)
 	addi $t3, $t3, 256 # Check bottom of bottom middle
 	lw $t3, 0($t3)
-	bne $t3, 0, return
-	
+	beq $t3, BULLETCOLOR, takeDamage
+	beq $t3, PLATFORMCOLOR, land
+	beq $t3, ENEMYTOPCOLOR, land
+	bne $t3, HEALTHCOLOR, skipD2Heal
+	jal heal
+skipD2Heal:
+	bne $t3, DBLJUMPCOLOR, skipD2Jump
+	jal doubleJump
+skipD2Jump:
+	bne $t3, PURPLE, skipD2Win
+	jal win
+skipD2Win:
+	la $t1, hitbox
+	lw $t4, 32($t1)	
 	addi $t4, $t4, 256 # Check bottom of bottom right
 	lw $t4, 0($t4)
-	bne $t4, 0, return
-	li $a0, 256
+	beq $t4, BULLETCOLOR, takeDamage
+	beq $t4, PLATFORMCOLOR, land
+	beq $t4, ENEMYTOPCOLOR, land
+	bne $t4, HEALTHCOLOR, skipD3Heal
+	jal heal
+skipD3Heal:
+	bne $t4, DBLJUMPCOLOR, skipD3Jump
+	jal doubleJump
+skipD3Jump:
+	bne $t4, PURPLE, skipD3Win
+	jal win
+skipD3Win:
 	
-	addi $sp, $sp, -4
-	sw $ra, 0($sp)
+	# Player has nothing under it. So it keeps falling
+	li $a0, 256
 	jal updateChar
 	
 	lw $t2, 0($t1)
@@ -397,29 +570,32 @@ moveDown:
 	lw $ra, 0($sp)
 	addi $sp, $sp, 4
 	jr $ra
+land: # Player lands on a legal surface (Platforms)
+	li $s3, 1
+	beq $s2, 1, chargeExtraJump # Double Jump has been picked
+	j changeColor
+chargeExtraJump: # Player can jump twice once it lands on a platform
+	li $s3, 2
+	j changeColor
 updateChar: # Updates position of character. $a0=change in position
 	la $t1, hitbox
 	li $t2, 0
 	move $t3, $a0
 	li $t6, 32 #Limit (Included)
-	
-StoreColor: # Store color of each hitbox in Stack to set later
+storeColor: # Store color of each hitbox in Stack to set later
 	add $t4, $t1, $t2 # $t4 = addr(hitbox) + i
 	lw $t5, 0($t4) # $t5 = current address
-	lw $t8, 0($t5) # color at current addrss
+	lw $t8, 0($t5) # color at current address
 	addi $sp, $sp, -4
-	sw $t8, 0($sp) 
+	sw $t8, 0($sp) # Save color to stack
 	
 	addi $t2, $t2, 4 # $t2 iterates hitbox array
 	
-	ble $t2, $t6, StoreColor
+	ble $t2, $t6, storeColor
 	li $t2, 32
 moveLoop: # Moves each hitbox address by value in $t3
 	add $t4, $t1, $t2 # $t4 = addr(hitbox) + i
 	lw $t5, 0($t4) # $t5 = current address
-	#ld $t8, 0($t5)
-	#li $t9, 0
-	#sw $t9, 0($t5)
 	add $t5, $t5, $t3 # $t5 = new address
 	
 	lw $t8, 0($sp)
@@ -452,10 +628,13 @@ bulletCollision: # Bullet collides into an object and disappears. $t1=address of
 	sw $zero, 0($t3)
 	sw $zero, -4($t3)
 	beq $t5, CHARCOLOR, bulletHit
+	beq $t5, DBLJUMPCOLOR, bulletHit
 	j bulletsMoveEnd
+	
 bulletHit: # Bullet collided with player
 	li $s1, 0 # Player is killed
 	j bulletsMoveEnd
+	
 enemyFire: # Creates a bullet. $a0 = x, $a1 = y, $a2 = Current Bullets array
 	addi $sp, $sp, -4
 	sw $ra, 0($sp)
@@ -472,49 +651,52 @@ enemyFire: # Creates a bullet. $a0 = x, $a1 = y, $a2 = Current Bullets array
 	
 	jal drawLineX
 	
-	
 	lw $ra, 0($sp)
 	addi $sp, $sp, 4
 	jr $ra
-createChar: # Creates playable character.
-	lw $s1, CharX
-	lw $s2, CharY
-	la $s3, hitbox
-	lw $s4, hitboxLen
-	
+createChar: # Creates playable character.	
 	addi $sp, $sp, -4
 	sw $ra, 0($sp)
 	
+	la $s6, hitbox
+	
 	# Set top hitbox
-	addi $a0, $s1, -1
-	addi $a1, $s2, -1
+	li $t1, CHARX
+	addi $a0, $t1, -1
+	li $t1, CHARY
+	addi $a1, $t1, -1
 	li $t1, 0
 	jal setHitbox 
 	
 	# Set middle hitbox
-	addi $s3, $s3, 12
-	addi $a0, $s1, -1
-	addi $a1, $s2, 0
+	addi $s6, $s6, 12
+	li $t1, CHARX
+	addi $a0, $t1, -1
+	li $t1, CHARY
+	addi $a1, $t1, 0
 	li $t1, 0
 	jal setHitbox 
 	
 	# Set bottom hitbox
-	addi $s3, $s3, 12
-	addi $a0, $s1, -1
-	addi $a1, $s2, 1
+	addi $s6, $s6, 12
+	li $t1, CHARX
+	addi $a0, $t1, -1
+	li $t1, CHARY
+	addi $a1, $t1, 1
 	li $t1, 0
 	jal setHitbox 
 	
 
 	# Create center
-	move $a0, $s1
-	move $a1, $s2
+	li $a0, CHARX
+	li $a1, CHARY
 	li $a2, CENTERCOLOR
 	
 	jal drawPixel
 	
-	addi $a0, $s1, 0
-	addi $a1, $s2, 1
+	li $a0, CHARX
+	li $t1, CHARY
+	addi $a1, $t1, 1
 	li $a2, 0
 	
 	jal drawPixel
@@ -523,7 +705,7 @@ createChar: # Creates playable character.
 	addi $sp, $sp, 4
 	jr $ra
 
-setHitbox: # Saves next three horizontal addresses in hitbox. $a0=x, $a1=y, $s3=hitbox, $t1=0
+setHitbox: # Saves next three horizontal addresses in hitbox. $a0=x, $a1=y, $s6=hitbox, $t1=0
 	li $t2,8  # Include when t1=0,4 or 8; cannot increment further
 	li $t0, BASE_ADDRESS
 	
@@ -532,7 +714,7 @@ setHitbox: # Saves next three horizontal addresses in hitbox. $a0=x, $a1=y, $s3=
 	mul $t5, $t5, 4 
 	add $t5, $t5, $t0 # $t5 stores address of pixel in display
 	
-	add $t3, $s3, $t1 # $t3 = addr(hitbox) + i
+	add $t3, $s6, $t1 # $t3 = addr(hitbox) + i
 	li $t6, CHARCOLOR
 	sw $t6, 0($t5)
 	sw $t5, 0($t3) # Save address in $t5 to hitbox array
@@ -591,43 +773,47 @@ drawEnemy: # Draws Enemy
 	addi $s2, $s2, 4
 	bgt $s3, 0, drawEnemy
 	jr $ra
-createLives:
+addLives:
 	addi $sp, $sp, -4
 	sw $ra, 0($sp)
-
-	li $a0, 56
-	li $a1, 59
-	li $a2, RED
-	li $a3, 5
-	jal drawLineX
-	
-	li $a0, 58
-	li $a1, 57
-	li $a2, RED
-	li $a3, 5
-	jal drawLineY
-	
-	li $a0, 48
-	li $a1, 59
-	li $a2, RED
-	li $a3, 5
-	jal drawLineX
-	
-	li $a0, 50
-	li $a1, 57
-	li $a2, RED
-	li $a3, 5
-	jal drawLineY
-	
-	li $a0, 40
-	li $a1, 59
-	li $a2, RED
-	li $a3, 5
-	jal drawLineX
-	
+	li $t1, 2
+	beq $s0, $t1, addSecondLife
+	li $t1, 1
+	beq $s0, $t1, addFirstLife
+addThirdLife:	
 	li $a0, 42
-	li $a1, 57
+	li $a1, 59
 	li $a2, RED
+	jal drawPickup
+addSecondLife:	
+	li $a0, 50
+	li $a1, 59
+	li $a2, RED
+	jal drawPickup
+
+addFirstLife:
+	li $a0, 58
+	li $a1, 59
+	li $a2, RED
+	jal drawPickup
+	
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
+	jr $ra
+drawPickup: # Draws a health token given center coordinates. $a0 = x, $a1 = y, $a2 = color
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
+	
+	move $t7, $a0
+	move $t8, $a1
+	move $t9, $a2
+	addi $a0, $t7, -2
+	li $a3, 5
+	jal drawLineX
+	
+	move $a0, $t7
+	addi $a1, $t8, -2
+	move $a2, $t9
 	li $a3, 5
 	jal drawLineY
 	
@@ -735,20 +921,391 @@ drawPixel:	#draws pixel on display. $a0=x,$a1=y,$a2=color
 	jr $ra
 
 	jr $ra
+doubleJump: # Obtain double jump ability. Creates a jump visual. Removes pickup from display 
+	addi $sp, $sp, -4 # Store $ra in stack
+	sw $ra, 0($sp)
+	
+	li $s2, 1 # Indicates double jump ability obtained
+
+	li $a0, DBLJUMPX
+	li $a1, DBLJUMPY
+	li $a2, 0
+	jal drawPickup
+	li $a0, DBLJUMPINDX
+	li $a1, DBLJUMPINDY
+	li $a2, DBLJUMPCOLOR
+	jal drawPickup
+	lw $ra, 0($sp) # load $ra 
+	addi $sp, $sp, 4
+	jr $ra
+heal: # Obtain an extra life. Creates a life visual and increases life counter. Removes pickup from display
+	addi $sp, $sp, -4 # Store $ra in stack
+	sw $ra, 0($sp)
+	
+	addi $s0, $s0, 1
+	jal addLives
+
+	li $a0, HEALTHX
+	li $a1, HEALTHY
+	li $a2, 0
+	jal drawPickup
+	lw $ra, 0($sp) # load $ra 
+	addi $sp, $sp, 4
+	jr $ra
+changeColor: # Changes color according to value in $s3
+	la $a0, hitbox
+	li $a1, 0
+	li $a3, 36
+	beq $s3, 2, jumpColor
+	li $a2, CHARCOLOR # Set to default Color
+	j setColor
+jumpColor: # Set to Double Jump Color
+	li $a2, DBLJUMPCOLOR
+setColor: # Sets color of player. $a0=hitbox, $a1=0,$a2=new color,$a3=4*hitboxLen
+	add $t4, $a0, $a1 # $t4 = addr(hitbox) + i
+	lw $t5, 0($t4) # $t5 = current address
+	beq $a1, 16, skipColor
+	sw $a2, 0($t5) # set color at current address
+skipColor:
+	addi $a1, $a1, 4 # $a1 iterates hitbox array
+	
+	blt $a1, $a3, setColor
+	jr $ra
+	
+takeDamage: # Player takes damage and loses a life
+	li $s1, 0
+restoreStackAndReturn: # Restores stack and returns
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
 return:	#returns to prior PC
 	jr $ra
+drawWinItem:
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
+	li $s1, ENDX
+	li $s2, ENDY
+	
+	addi $a0, $s1, -2
+	addi $a1, $s2, -2
+	li $a2, PURPLE
+	li $a3, 5
+	jal drawLineX
+	
+	addi $a0, $s1, -2
+	addi $a1, $s2, -2
+	li $a2, PURPLE
+	li $a3, 5
+	jal drawLineY
+	
+	addi $a0, $s1, 2
+	addi $a1, $s2, -2
+	li $a2, PURPLE
+	li $a3, 5
+	jal drawLineY
+	
+	addi $a0, $s1, -2
+	addi $a1, $s2, 2
+	li $a2, PURPLE
+	li $a3, 5
+	jal drawLineX
+	
+	move $a0, $s1
+	move $a1, $s2
+	li $a2, PURPLE
+	jal drawPixel
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
+	jr $ra
+win:
+	li $s4, 1
+	jr $ra
+winScreen:
+	la $a0, BASE_ADDRESS
+	li $a1, 4096
+	li $a2, GREEN
+	jal fill
+	j end
 restart:
 	la $a0, BASE_ADDRESS
 	li $a1, 4096
 	li $a2, 0
+	la $t1, Bullets
+	sw $zero, 0($t1)
+	sw $zero, 4($t1)
 	jal fill
 	j main
 gameOver:
+	li $s5, 1
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
 	la $a0, BASE_ADDRESS
 	li $a1, 4096
-	li $a2, BLUE
+	beq $s4,1, gameWin
+	li $a2, RED
 	jal fill
-	j end
+	jal printYOU
+	jal printLOSE
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
+
+	jr $ra
+gameWin:
+	li $a2, GREEN
+	jal fill	
+	jal printYOU
+	jal printWIN
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
+	jr $ra
+printYOU:
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
+	
+	li $a0, 10
+	li $a1, 10
+	li $a2, WHITE
+	li $a3, 6
+	jal drawLineY
+	li $a0, 10
+	li $a1, 16
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	li $a0, 20
+	li $a1, 10
+	li $a2, WHITE
+	li $a3, 6
+	jal drawLineY
+	li $a0, 15
+	li $a1, 16
+	li $a2, WHITE
+	li $a3, 10
+	jal drawLineY
+	
+	li $a0, 25
+	li $a1, 10
+	li $a2, WHITE
+	li $a3, 15
+	jal drawLineY
+	li $a0, 25
+	li $a1, 10
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	li $a0, 25
+	li $a1, 25
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	li $a0, 35
+	li $a1, 10
+	li $a2, WHITE
+	li $a3, 15
+	jal drawLineY
+	
+	li $a0, 40
+	li $a1, 10
+	li $a2, WHITE
+	li $a3, 15
+	jal drawLineY
+	li $a0, 40
+	li $a1, 25
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	li $a0, 50
+	li $a1, 10
+	li $a2, WHITE
+	li $a3, 15
+	jal drawLineY
+	
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
+	jr $ra
+	
+printLOSE:
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
+	
+	li $a0, 5
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 15
+	jal drawLineY
+	li $a0, 5
+	li $a1, 50
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	
+	li $a0, 20
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 15
+	jal drawLineY
+	li $a0, 20
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	li $a0, 20
+	li $a1, 50
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	li $a0, 30
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 15
+	jal drawLineY
+	
+	li $a0, 35
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	li $a0, 35
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 8
+	jal drawLineY
+	li $a0, 35
+	li $a1, 42
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	li $a0, 45
+	li $a1, 42
+	li $a2, WHITE
+	li $a3, 8
+	jal drawLineY
+	li $a0, 35
+	li $a1, 50
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	
+	
+	li $a0, 50
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 15
+	jal drawLineY
+	li $a0, 50
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	li $a0, 50
+	li $a1, 42
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	li $a0, 50
+	li $a1, 50
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
+	jr $ra
+printWIN:
+	addi $sp, $sp, -4
+	sw $ra, 0($sp)
+	
+	li $a0, 10
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 15
+	jal drawLineY
+	li $a0, 10
+	li $a1, 50
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	li $a0, 15
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 15
+	jal drawLineY
+	li $a0, 20
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 15
+	jal drawLineY
+	
+	li $a0, 25
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+	li $a0, 30
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 15
+	jal drawLineY
+	li $a0, 25
+	li $a1, 50
+	li $a2, WHITE
+	li $a3, 11
+	jal drawLineX
+
+	li $a0, 40
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 16
+	jal drawLineY
+	li $a0, 49
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 16
+	jal drawLineY
+	li $a0, 41
+	li $a1, 35
+	li $a2, WHITE
+	li $a3, 2
+	jal drawLineY
+	li $a0, 42
+	li $a1, 37
+	li $a2, WHITE
+	li $a3, 2
+	jal drawLineY
+	li $a0, 43
+	li $a1, 39
+	li $a2, WHITE
+	li $a3, 2
+	jal drawLineY
+	li $a0, 44
+	li $a1, 41
+	li $a2, WHITE
+	li $a3, 2
+	jal drawLineY
+
+	li $a0, 45
+	li $a1, 43
+	li $a2, WHITE
+	li $a3, 2
+	jal drawLineY
+	li $a0, 46
+	li $a1, 45
+	li $a2, WHITE
+	li $a3, 2
+	jal drawLineY
+	li $a0, 47
+	li $a1, 47
+	li $a2, WHITE
+	li $a3, 2
+	jal drawLineY
+	li $a0, 48
+	li $a1, 49
+	li $a2, WHITE
+	li $a3, 2
+	jal drawLineY
+	
+	lw $ra, 0($sp)
+	addi $sp, $sp, 4
+	jr $ra
 fill: # Fills the display with pixels. $a0=BASE_ADDRESS, $a1=Number of pixels, $a2=color to be filled in
 	sw $a2, 0($a0)
 	addi $a0, $a0, 4 	# advance to next pixel position in display
